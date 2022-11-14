@@ -63,34 +63,13 @@ class Render(object):
         self.filename = filename 
         self.width = 100 
         self.height = 100
-        self.viewport_x = 0 
-        self.viewport_y = 0 
-        self.viewport_width = 100 
-        self.viewport_height = 100
         self.current_color = color(255, 255, 255) # por defecto blanco
-        self.vertex_color = color(200, 0, 0) # por defecto rojo
         self.framebuffer = []
         self.glClear()
 
     def glCreateWindow(self, width, height):
         self.width = width
         self.height = height
-
-    def glViewPort(self, x, y, width, height):
-
-        if self.width < x + width or self.height < y + height:
-            print("[!] El viewport debe estar dentro de las medidas de la pantalla")
-            self.viewport_x = 0
-            self.viewport_y = 0
-            self.viewport_width = self.width
-            self.viewport_height = self.height
-            self.glClear()
-        else:
-            self.viewport_x = x
-            self.viewport_y = y
-            self.viewport_width = width
-            self.viewport_height = height
-            self.glClear()
 
     def glClear(self):
         self.framebuffer= [
@@ -105,28 +84,16 @@ class Render(object):
 
         for x in range(self.width):
             for y in range(self.height):
-                if x >= self.viewport_x and x <= self.viewport_width and y >= self.viewport_y and y <= self.viewport_height:
-                    self.framebuffer[x][y] = self.current_color 
+                self.framebuffer[x][y] = color(0, 0, 0) 
 
-    def glClearColor(self, r, g, b):
+    def glColor(self, r, g, b):
         self.current_color = color(r, g, b)
 
-    def glVertex(self, x, y):
-
-        # convertir coordenadas normalizadas a cordenadas del dispositivo
-        half_size_width = self.viewport_width / 2
-        half_size_height = self.viewport_height / 2
-
-        coord_x = int((( x + 1 ) * half_size_width ))
-        coord_y = int((( y + 1 ) * half_size_height ))
-
-        self.framebuffer[coord_x][coord_y] = self.vertex_color
 
     def point(self, x, y):
         if 0 < x < self.width and 0 < y < self.height:
-            self.framebuffer[x][y] = self.vertex_color
+            self.framebuffer[x][y] = self.current_color
 
-       
     def line(self, v1, v2):
         x0 = round(v1.x)
         y0 = round(v1.y)
@@ -154,28 +121,17 @@ class Render(object):
         y =  y0
 
         for x in range(x0, x1 + 1):
-
-            
             if steep:
                 r.point(y, x)
             else:
                 r.point(x, y)
 
-            # offset += (dy/dx) * dx * 2
             offset += dy * 2
 
-            if offset > threshold:
+            if offset >= threshold:
                 y += 1 if y0 < y1 else  -1
-                # threshold += 1 * dx * 2
                 threshold += dx * 2
 
-
-    def transform_vertex(self, vertex, scale, translate):
-        return V3(
-            (vertex[0] * scale[0]) + translate[0],
-            (vertex[1] * scale[1]) + translate[1],
-            (vertex[2] * scale[2]) + translate[2],
-        )
 
     def load_model(self, filename, scale_factor = (1, 1, 1), translate_factor = (0, 0, 0)):
         obj = Obj(filename)
@@ -196,36 +152,99 @@ class Render(object):
         n = (b - a) * (c - a)
         i = n.norm() @ luz.norm()
 
-        if i < 0:
-            return
+        if a.y < b.y:
+            a, b = b, a
 
-        grey = round(255 * i)
-        self.glColor(grey,  grey, grey)
-  
+        if a.y < c.y:
+            a, c = c, a
+
+        if b.y < c.y:
+            b, c = c, b
 
         box_min, box_max = bounding_box(a, b, c)
         box_min.round()
         box_max.round()
-        for x in range(box_min.x, box_max.x + 1):
-            for y in range(box_min.y, box_max.y + 1):
-                w, v, u = barycenter(a, b, c, V3(x, y))
 
-                if (w < 0 or v < 0 or u < 0):
-                    continue
-                
+        if a.y == b.y:
+            x = c.x
+            y = c.x
 
-                z = a.z * w + b.z * v * c.z * u
+            xo, yo = c.y, a.y + 1
+            x, y = int(x), int(y)
 
-                if (self.zbuffer[x][y] < z):
-                    self.zbuffer[x][y] = z
-                    self.point(x, y)
+            for i in range(xo, yo):
+                self.line(
+                    V3(int(x), i), 
+                    V3(int(y), i)
+                )
+                x += (c.x - a.x) / (c.y - a.y)
+                y += (c.x - b.x) / (c.y - b.y)
+
+            for x in range(box_min.x, box_max.x + 1):
+                for y in range(box_min.y, box_max.y + 1):
+                    w, v, u = barycenter(a, b, c, V3(x, y))
+
+                    if (w < 0 or v < 0 or u < 0):
+                        continue
+
+        elif b.y == c.y:
+            x = b.x
+            y = c.x
+            
+            xo, yo = b.y, a.y + 1
+            x, y = int(x), int(y)
+
+            for i in range(xo, yo):
+                self.line(
+                    V3(x, i),
+                    V3(y, i)
+                )
+                x += (b.x - a.x) / (b.y - a.y)
+                y +=  (c.x - a.x) / (c.y - a.y)
+
+            for x in range(box_min.x, box_max.x + 1):
+                for y in range(box_min.y, box_max.y + 1):
+                    w, v, u = barycenter(a, b, c, V3(x, y))
+
+                    if (w < 0 or v < 0 or u < 0):
+                        continue
+        else:
+
+            z = a.x + ((b.y - a.y) / (c.y - a.y)) * (c.x - a.x)
+            w = V3(z, b.y)    
+            x = b.x
+            y = w.x
+            
+            xo, yo = b.y, a.y + 1
+            x, y = int(x), int(y)
+
+            for i in range(xo, yo):
+                self.line(V3(x, i), V3(y, i))
+
+                x += (b.x - a.x) / (b.y - a.y)
+                y +=  (w.x - a.x) / (w.y - a.y)
+
+            mca = (c.x - b.x) / (c.y - b.y)
+            mcb = (c.x - w.x) / (c.y - w.y)
+            x1 = c.x
+            x2 = c.x
+
+            for y in range(c.y, b.y + 1):
+                self.line(V3(int(x1), y), V3(int(x2), y))
+                x1 += mca
+                x2 += mcb
 
 
-       
+    def draw(self, fig, c):
+        r.current_color = c
+        for i in range(len(fig)):
+            r.triangle(
+                V3(fig[i][0][0], fig[i][0][1]),
+                V3(fig[i][1][0], fig[i][1][1]), 
+                V3(fig[i][2][0], fig[i][2][1])
+            )
+            
         
-
-    def glColor(self, r, g, b):
-        self.vertex_color = color(r, g, b)
 
     def glFinish(self):
         f = open(self.filename, 'bw')
@@ -262,30 +281,69 @@ class Render(object):
 r = Render()
 r.glInit('lab1-polygon.bmp')
 r.glCreateWindow(800, 800)
-r.glViewPort(0,0, 800, 800)
-r.glClearColor(0, 0, 0)
 r.glClear()
+r.glColor(255, 255, 255)
 
-# Poligono 1
-r.triangle(V3(165, 380),  V3(185, 360), V3(180, 330))
-r.triangle(V3(207, 345), V3(233, 330),  V3(230, 360))
-r.triangle(V3(250, 380), V3(220, 385), V3(205, 410))
+fig1 = [
+    [[205, 410], [193, 383], [220, 385]],
+    [[165, 380], [193, 383], [185, 360]],
+    [[207, 345], [180, 330], [185, 360]],
+    [[207, 345], [233, 330], [230, 360]],
+    [[230, 360], [250, 380], [220, 385]],
+    [[208, 366], [185, 360], [207, 345]],
+    [[208, 366], [193, 383], [220, 385]],
+    [[208, 366], [185, 360], [205, 411]],
+    [[208, 366], [220, 385], [230, 360]],
+    [[208, 366], [230, 360], [207, 345]]
+]
 
-# Poligono 2
-r.triangle(V3(321, 335),  V3(288, 286), V3(339, 251))
+fig2 = [
+    [[205, 410], [193, 383], [220, 385]],
+    [[321, 335], [374, 302], [288, 286]],
+    [[339, 251], [374, 302], [288, 286]],
+    [[377, 249], [411, 197], [436, 249]]
+]
+
+fig3 = [
+    [[205, 410], [193, 383], [220, 385]],
+    [[413, 177], [466, 180], [448, 159]],
+    [[517, 144], [466, 180], [448, 159]],
+    [[517, 144], [502, 88], [448, 159]],
+    [[517, 144], [502, 88],  [553, 53]],
+    [[553, 53], [660, 52], [535, 36]],
+    [[535, 36], [660, 52], [676, 37]],
+    [[517, 144], [553, 53], [614, 132]],
+    [[517, 144], [552, 214], [614, 132]],
+    [[552, 214], [597, 215], [614, 132]],
+    [[597, 215], [615, 214], [614, 132]],
+    [[597, 215], [580, 214], [609, 230]],
+    [[597, 215], [609, 230], [615, 214]],
+    [[609, 230], [615, 214], [632, 230]],
+    [[615, 214], [659, 214], [614, 132]],
+    [[659, 214], [672, 192], [614, 132]],
+    [[672, 192], [761, 179], [750, 145]],
+    [[672, 192], [750, 145], [614, 132]],
+    [[750, 145], [614, 132], [660, 52]],
+    [[614, 132], [553, 53], [660, 52]]
+]
 
 
-# Poligono 3
-r.triangle(V3(377, 249),  V3(411, 197), V3(436, 249))
+fig4 = [
+    [[205, 410], [193, 383], [220, 385]],
+    [[682, 175], [710, 160], [739, 170]],
+    [[739, 170], [710, 160], [735, 148]],
+    [[708, 120], [710, 160], [735, 148]],
+    [[682, 175], [710, 160], [708, 120]],
+]
 
-# Poligono 4
-r.triangle(V3(413, 177),  V3(448, 159), V3(502, 88))
-r.triangle(V3(553, 53),  V3(532, 36), V3(676, 37))
-r.triangle(V3(660, 52),  V3(750, 145), V3(761, 179))
-r.triangle(V3(632, 230),  V3(580, 230), V3(597, 215))
-r.triangle(V3(552, 214),  V3(517, 114), V3(466, 180))
 
-# Poligono 5
-r.triangle(V3(682, 175),  V3(708, 120), V3(735, 682))
+r.draw(fig1, color(0, 255, 0))
+r.draw(fig2, color(255, 0, 0))
+r.draw(fig3, color(100, 50, 0))
+r.draw(fig4, color(100, 50, 0))
+# r.draw(fig2)
+# r.draw(fig3)
+# r.draw(fig4)
+# r.draw(fig5)
 
 r.glFinish()
